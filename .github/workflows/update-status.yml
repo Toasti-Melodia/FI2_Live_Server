@@ -35,6 +35,5 @@ jobs:
         run: node rename-channels.js
         env:
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-          NA_CHANNEL_ID: ${{ secrets.NA_CHANNEL_ID }}
-          EU_CHANNEL_ID: ${{ secrets.EU_CHANNEL_ID }}
-          CHANNEL_NAME_MODE: both
+          GONDOLIN_CHANNEL_1_ID: ${{ secrets.NA_CHANNEL_ID }}
+          GONDOLIN_CHANNEL_2_ID: ${{ secrets.EU_CHANNEL_ID }}

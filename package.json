@@ -1,0 +1,18 @@
+{
+  "name": "gondolin-status-webhook",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Updates a Discord message (via webhook) and optionally voice channel names with live player count/map for Gondolin (Full Invasion 2 Osiris) Warband servers, run on a schedule by GitHub Actions.",
+  "scripts": {
+    "update": "node update-status.js",
+    "init": "node init-message.js",
+    "rename": "node rename-channels.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,40 @@
+name: FI2 Status Update
+
+on:
+  schedule:
+    - cron: '*/12 * * * *'
+
+  workflow_dispatch: {}
+
+  repository_dispatch:
+    types: [update-status]
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    env:
+      HAS_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN != '' }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - run: npm install
+
+      - name: Update status message (embed)
+        run: node update-status.js
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_MESSAGE_ID: ${{ secrets.DISCORD_MESSAGE_ID }}
+
+      - name: Update channel names (optional)
+        if: ${{ env.HAS_BOT_TOKEN == 'true' }}
+        run: node rename-channels.js
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          NA_CHANNEL_ID: ${{ secrets.NA_CHANNEL_ID }}
+          EU_CHANNEL_ID: ${{ secrets.EU_CHANNEL_ID }}
+          CHANNEL_NAME_MODE: both

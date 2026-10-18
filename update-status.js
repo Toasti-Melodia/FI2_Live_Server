@@ -23,6 +23,7 @@ const LIVE_MAX_AGE_MS = (Number(process.env.LIVE_MAX_AGE_MIN) || 10) * 60 * 1000
 const LIVE_TIMEOUT_MS = (Number(process.env.LIVE_TIMEOUT_SEC) || 20) * 1000;
 const MAP_WAIT_MS = (Number(process.env.MAP_WAIT_SEC) || 60) * 1000;
 const MAP_POLL_MS = (Number(process.env.MAP_POLL_SEC) || 10) * 1000;
+const DEFAULT_SETTINGS = { difficulty: 1 };
 if (!WEBHOOK_URL || !MESSAGE_ID) {
   console.error('Missing DISCORD_WEBHOOK_URL or DISCORD_MESSAGE_ID (repo secrets).');
   process.exit(1);
@@ -103,6 +104,7 @@ function parseLive(data) {
     defenders: data.df || '',
     invaders: data.inv || '',
     wave: Number(data.wavenumber) || 0,
+    exportedAt: Number(data.exportedAt) || 0,
     settings: parseSettings(data),
   };
 }
@@ -133,14 +135,12 @@ function withTimeout(promise, ms, label) {
 async function downloadLive(sftp, source) {
   await sftp.connect({ host: source.host, port: source.port, username: source.username, password: source.password, readyTimeout: 10000 });
   const stat = await sftp.stat(source.path);
-  if (Date.now() - stat.modifyTime > LIVE_MAX_AGE_MS) {
-    console.log(`Live source ${source.n}: file is older than ${LIVE_MAX_AGE_MS / 60000} min -- skipped.`);
-    return null;
-  }
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const buffer = await sftp.get(source.path);
-      return JSON.parse(buffer.toString('utf8'));
+      const parsed = JSON.parse(buffer.toString('utf8'));
+      parsed.exportedAt = Math.floor(stat.modifyTime / 1000);
+      return parsed;
     } catch (err) {
       if (attempt === 1) throw err;
       await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -178,6 +178,10 @@ function buildLiveCards(live, previous, now) {
   const cards = [];
   for (const data of Object.values(live)) {
     if (!data.name || !data.name.toLowerCase().includes(NAME_KEYWORD.toLowerCase())) continue;
+    if (data.exportedAt > 0 && now - data.exportedAt > LIVE_MAX_AGE_MS / 1000) {
+      console.log(`Live source "${data.name}" is older than ${LIVE_MAX_AGE_MS / 60000} min -- cannot build a fallback card.`);
+      continue;
+    }
     if (data.count === null) {
       console.log(`Live source "${data.name}" has no player count -- cannot build a fallback card.`);
       continue;
@@ -210,6 +214,11 @@ function liveMapMatches(data, card) {
   const cardMap = normalizeMap(card.map);
   if (!liveMap || !cardMap) return true;
   return liveMap.includes(cardMap) || cardMap.includes(liveMap);
+}
+function resetSettingsForNewMap(data, card) {
+  if (!data || data.exportedAt === 0 || data.exportedAt >= card.since) return data;
+  console.log(`${card.name}: live JSON was exported before this map started -- poll settings and custom invasion reset to default.`);
+  return { ...data, settings: { ...DEFAULT_SETTINGS } };
 }
 function findStaleCards(cards, live, now) {
   return cards.filter((card) => {
@@ -320,7 +329,7 @@ async function main() {
   for (const card of cards) {
     const isStale = staleKeys.has(card.key);
     if (isStale) console.log(`${card.name}: live JSON still has the old map after ${MAP_WAIT_MS / 1000}s -- panel left empty instead of showing old data.`);
-    const data = isStale ? null : pickLive(live, card);
+    const data = isStale ? null : resetSettingsForNewMap(pickLive(live, card), card);
     card.live = data && card.players === 0 ? { ...data, players: [] } : data || null;
     console.log(`${card.name}: top 10 panel ${card.live ? `${card.live.players.length} players` : 'none'}`);
   }

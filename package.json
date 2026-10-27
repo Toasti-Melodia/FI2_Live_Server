@@ -1,0 +1,23 @@
+{
+  "name": "gondolin-status-webhook",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Melodia Server Monitor: renders a live status card image and updates a Discord webhook message plus a text channel name with player counts for Full Invasion Osiris Warband servers.",
+  "scripts": {
+    "update": "node update-status.js",
+    "init": "node init-message.js",
+    "init:info": "node init-info.js"
+  },
+  "dependencies": {
+    "@expo-google-fonts/cinzel": "^0.4.2",
+    "@expo-google-fonts/libre-baskerville": "^0.4.3",
+    "@expo-google-fonts/spectral": "^0.4.1",
+    "@napi-rs/canvas": "^1.0.11",
+    "cheerio": "^1.0.0",
+    "ssh2-sftp-client": "^12.1.1"
+  },
+  "engines": {
+    "node": ">=20.18.1"
+  }
+}

@@ -1,0 +1,63 @@
+name: Melodia Server Monitor
+on:
+  workflow_dispatch: {}
+  repository_dispatch:
+    types: [update-status]
+concurrency:
+  group: melodia-monitor
+  cancel-in-progress: false
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Update Gondolin card and channel name
+        run: node update-status.js
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_MESSAGE_ID: ${{ secrets.DISCORD_MESSAGE_ID }}
+          DISCORD_MESSAGE_ID_2: ${{ secrets.DISCORD_MESSAGE_ID_2 }}
+          DISCORD_MESSAGE_ID_3: ${{ secrets.DISCORD_MESSAGE_ID_3 }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          GONDOLIN_STATUS_CHANNEL_ID: ${{ secrets.GONDOLIN_STATUS_CHANNEL_ID }}
+          LIVE_1_HOST: ${{ secrets.LIVE_1_HOST }}
+          LIVE_1_PORT: ${{ secrets.LIVE_1_PORT }}
+          LIVE_1_USER: ${{ secrets.LIVE_1_USER }}
+          LIVE_1_PASS: ${{ secrets.LIVE_1_PASS }}
+          LIVE_1_PATH: ${{ secrets.LIVE_1_PATH }}
+          LIVE_2_HOST: ${{ secrets.LIVE_2_HOST }}
+          LIVE_2_PORT: ${{ secrets.LIVE_2_PORT }}
+          LIVE_2_USER: ${{ secrets.LIVE_2_USER }}
+          LIVE_2_PASS: ${{ secrets.LIVE_2_PASS }}
+          LIVE_2_PATH: ${{ secrets.LIVE_2_PATH }}
+      - name: Update server list message
+        if: ${{ !cancelled() }}
+        run: node update-info.js
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          INFO_MESSAGE_ID: ${{ secrets.INFO_MESSAGE_ID }}
+          INFO_ENABLED: ${{ vars.INFO_ENABLED }}
+          INFO_COUNT: ${{ vars.INFO_COUNT }}
+      - name: Update top servers message
+        if: ${{ !cancelled() }}
+        run: node update-top.js
+        env:
+          TOP_WEBHOOK_URL: ${{ secrets.TOP_WEBHOOK_URL }}
+          TOP_MESSAGE_ID: ${{ secrets.TOP_MESSAGE_ID }}
+          TOP_ENABLED: ${{ vars.TOP_ENABLED }}
+          TOP_COUNT: ${{ vars.TOP_COUNT }}
+      - name: Update Amber text message
+        if: ${{ !cancelled() }}
+        run: node update-amber.js
+        env:
+          AMBER_WEBHOOK_URL: ${{ secrets.AMBER_WEBHOOK_URL }}
+          AMBER_MESSAGE_ID: ${{ secrets.AMBER_MESSAGE_ID }}
+          AMBER_ENABLED: ${{ vars.AMBER_ENABLED }}
+          AMBER_COUNT: ${{ vars.AMBER_COUNT }}
+          AMBER_PRIORITY_KEYWORD: ${{ vars.AMBER_PRIORITY_KEYWORD }}

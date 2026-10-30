@@ -63,11 +63,11 @@ export function describeLive(live) {
     invaders.suffix = FULL_SETS[s.fullset];
   }
   let difficulty = null;
-  if (s.brainy !== undefined && s.brainy !== 0) {
+  if (s.brainy > 0) {
     difficulty = { text: 'Hardbots', tone: 'extreme' };
-  } else if (s.difficulty !== undefined) {
+  } else if (Object.keys(s).length > 0) {
     const known = DIFFICULTIES[s.difficulty];
-    difficulty = known ? { text: known[0], tone: known[1] } : { text: 'Custom', tone: 'custom' };
+    difficulty = known ? { text: known[0], tone: known[1] } : { text: 'Normal', tone: 'normal' };
   }
   const polls = [];
   const add = (label, value) => {

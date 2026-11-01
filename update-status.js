@@ -42,8 +42,11 @@ async function fetchFirstMessage() {
   if (!match) return { state: {}, extra: null };
   const state = {};
   for (const entry of match[1].split('_')) {
-    const [key, since] = entry.split('.');
-    if (key && since && key !== 'none') state[key] = parseInt(since, 36);
+    const [key, since, started] = entry.split('.');
+    if (key && since && key !== 'none') {
+      const sinceValue = parseInt(since, 36);
+      state[key] = { since: sinceValue, started: started === undefined ? sinceValue : parseInt(started, 36) };
+    }
   }
   const extra = match[2] === undefined ? null : match[2].split('_').filter((v) => /^\d+$/.test(v));
   return { state, extra };
@@ -51,7 +54,7 @@ async function fetchFirstMessage() {
 function buildCards(listed, previous, now) {
   const cards = listed.map((server) => {
     const key = stateKey(server.name, server.map);
-    return { ...server, key, since: previous[key] ?? now };
+    return { ...server, key, since: previous[key]?.since ?? now, started: previous[key]?.started ?? 0 };
   });
   cards.sort((a, b) => a.name.localeCompare(b.name));
   return cards.slice(0, MAX_CARDS);
@@ -161,7 +164,7 @@ function buildLiveCards(live, previous, now) {
     }
     const map = data.map || 'unknown';
     const key = stateKey(data.name, map);
-    cards.push({ name: data.name, module: '', gameType: '', map, region: '', players: data.count, maxPlayers: data.max, key, since: previous[key] ?? now });
+    cards.push({ name: data.name, module: '', gameType: '', map, region: '', players: data.count, maxPlayers: data.max, key, since: previous[key]?.since ?? now, started: previous[key]?.started ?? 0 });
   }
   cards.sort((a, b) => a.name.localeCompare(b.name));
   return cards.slice(0, MAX_CARDS);
@@ -300,6 +303,10 @@ async function main() {
     const data = isStale ? null : resetSettingsForNewMap(pickLive(live, card), card);
     card.live = data && card.players === 0 ? { ...data, players: [] } : data || null;
     console.log(`${card.name}: top 10 panel ${card.live ? `${card.live.players.length} players` : 'none'}`);
+    if (card.live) {
+      if (card.live.wave < 2) card.started = 0;
+      else if (card.players > 0 && card.started === 0) card.started = now;
+    }
   }
   for (const card of cards) {
     const file = resolveMapImage(MAPS_DIR, card.map);
@@ -312,7 +319,7 @@ async function main() {
     const old = existingExtra[i - 1];
     try {
       const image = await renderMonitor({ cards: slots[i], now, mapsDir: MAPS_DIR, keyword: NAME_KEYWORD });
-      const filename = `mm-${now.toString(36)}-${slots[i][0].key}.${slots[i][0].since.toString(36)}.png`;
+      const filename = `mm-${now.toString(36)}-${slots[i][0].key}.${slots[i][0].since.toString(36)}.${slots[i][0].started.toString(36)}.png`;
       let id = old ? await writeMessage(old, image, filename, now) : null;
       if (!id) id = await createMessage(image, filename, now);
       extraIds.push(id);
@@ -324,7 +331,7 @@ async function main() {
   }
   for (const id of existingExtra.slice(slots.length - 1)) await deleteMessage(id);
   const image = await renderMonitor({ cards: slots[0], now, mapsDir: MAPS_DIR, keyword: NAME_KEYWORD });
-  const encoded = cards.map((c) => `${c.key}.${c.since.toString(36)}`).join('_') || 'none';
+  const encoded = cards.map((c) => `${c.key}.${c.since.toString(36)}.${c.started.toString(36)}`).join('_') || 'none';
   const filename = `mm-${now.toString(36)}-${encoded}-${extraIds.join('_') || 'none'}.png`;
   if (!(await writeMessage(MESSAGE_ID, image, filename, now))) throw new Error('First status message was not found (HTTP 404) -- check DISCORD_MESSAGE_ID.');
   try {

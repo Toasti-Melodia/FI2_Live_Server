@@ -38,7 +38,7 @@ const KILLS = '#d6c28a';
 const DEFENDERS = '#9cc5f5';
 const INVADERS = '#f0a0a2';
 const LABEL = '#a3abbd';
-const EMPTY_VIEW = { defenders: { text: 'Defenders', suffix: '' }, invaders: { text: 'Invaders', suffix: '' }, difficulty: null, polls: [], hasSettings: false };
+const EMPTY_VIEW = { defenders: null, invaders: null, difficulty: null, polls: [], hasSettings: false };
 const EMPTY_LIVE = { players: [] };
 const TONES = { easy: '#a6dcb4', normal: '#f1f3f8', hard: '#f5a35c', extreme: '#f0a0a2', custom: '#c9b8f0' };
 export function mapSlug(map) {
@@ -338,18 +338,20 @@ function drawLive(ctx, live, view, px, y, w) {
   ctx.stroke();
   const mid = px + w / 2;
   const room = w / 2 - 56;
-  const fsize = factionSize(ctx, view.defenders, view.invaders, room);
-  const defW = factionLayout(ctx, view.defenders, fsize).total;
-  const invW = factionLayout(ctx, view.invaders, fsize).total;
-  ctx.font = '12px MMBodyBold';
-  const vsW = spacedWidth(ctx, 'VS', 2);
-  const vsGap = 18;
-  const startX = mid - (defW + vsGap + vsW + vsGap + invW) / 2;
-  drawFaction(ctx, view.defenders, DEFENDERS, startX, y + 38, 'left', fsize);
-  ctx.font = '12px MMBodyBold';
-  ctx.fillStyle = GREY;
-  drawSpaced(ctx, 'VS', startX + defW + vsGap, y + 37, 2);
-  drawFaction(ctx, view.invaders, INVADERS, startX + defW + vsGap + vsW + vsGap, y + 38, 'left', fsize);
+  if (view.defenders && view.invaders) {
+    const fsize = factionSize(ctx, view.defenders, view.invaders, room);
+    const defW = factionLayout(ctx, view.defenders, fsize).total;
+    const invW = factionLayout(ctx, view.invaders, fsize).total;
+    ctx.font = '12px MMBodyBold';
+    const vsW = spacedWidth(ctx, 'VS', 2);
+    const vsGap = 18;
+    const startX = mid - (defW + vsGap + vsW + vsGap + invW) / 2;
+    drawFaction(ctx, view.defenders, DEFENDERS, startX, y + 38, 'left', fsize);
+    ctx.font = '12px MMBodyBold';
+    ctx.fillStyle = GREY;
+    drawSpaced(ctx, 'VS', startX + defW + vsGap, y + 37, 2);
+    drawFaction(ctx, view.invaders, INVADERS, startX + defW + vsGap + vsW + vsGap, y + 38, 'left', fsize);
+  }
   const left = px + 16;
   const colGap = 12;
   const colW = (w - 32 - colGap * (LIVE_COLS - 1)) / LIVE_COLS;
@@ -530,7 +532,7 @@ async function drawCard(ctx, card, y, info) {
   drawLabel(ctx, 'MAP STARTED', x0, py + 160);
   ctx.textAlign = 'left';
   if (card.players > 0) {
-    const ago = formatAgo(Math.max(0, info.now - card.since));
+    const ago = card.started > 0 ? formatAgo(Math.max(0, info.now - card.started)) : '—';
     const wave = card.live && card.live.wave > 0 ? `[Wave: ${card.live.wave}]` : '';
     ctx.font = '21px MMBodyBold';
     const waveW = wave ? ctx.measureText(wave).width + 12 : 0;

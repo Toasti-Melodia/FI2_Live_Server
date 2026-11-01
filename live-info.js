@@ -55,7 +55,8 @@ export function parseSettings(data) {
 }
 export function describeLive(live) {
   const s = live.settings || {};
-  const invaders = { text: live.invaders || '?', suffix: '' };
+  const wave = live.wave || 0;
+  const invaders = { text: live.invaders || '', suffix: '' };
   const word = INVASION_WORDS[s.custominv];
   if (word) {
     invaders.text = `Invasion of ${word}`;
@@ -64,7 +65,7 @@ export function describeLive(live) {
   }
   let difficulty = null;
   if (s.brainy > 0) {
-    difficulty = { text: 'Hardbots', tone: 'extreme' };
+    difficulty = wave >= 2 ? { text: 'Hardbots', tone: 'extreme' } : null;
   } else if (Object.keys(s).length > 0) {
     const known = DIFFICULTIES[s.difficulty];
     difficulty = known ? { text: known[0], tone: known[1] } : { text: 'Normal', tone: 'normal' };
@@ -84,9 +85,10 @@ export function describeLive(live) {
   if (s.fullboss === 1) add('Full Boss', 'Yes');
   if (s.fullrandom === 1) add('Full Faction', 'Yes');
   if (!nonstop) add('Breaks', BREAKS[s.breakset]);
+  const defenderText = SCENARIO_DEFENDERS[s.scenario] || live.defenders || '';
   return {
-    defenders: { text: SCENARIO_DEFENDERS[s.scenario] || live.defenders || '?', suffix: '' },
-    invaders,
+    defenders: defenderText ? { text: defenderText, suffix: '' } : null,
+    invaders: invaders.text ? invaders : null,
     difficulty,
     polls,
     hasSettings: Object.keys(s).length > 0,

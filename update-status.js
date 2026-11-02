@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { basename } from 'node:path';
 import SftpClient from 'ssh2-sftp-client';
 import { renderMonitor, resolveMapImage } from './render-card.js';
-import { loadServerList } from './servers.js';
+import { loadServerList, cleanMap } from './servers.js';
 import { TOP_COUNT, parseSettings } from './live-info.js';
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 const MESSAGE_ID = process.env.DISCORD_MESSAGE_ID;
@@ -17,24 +17,27 @@ const CHANNEL_PREFIX = process.env.CHANNEL_PREFIX || '📺┃𝐋𝐢𝐯𝐞-�
 const CHANNEL_SEPARATOR = process.env.CHANNEL_SEPARATOR || '┃';
 const MAPS_DIR = new URL('./maps', import.meta.url).pathname;
 const API = process.env.DISCORD_API || 'https://discord.com/api/v10';
-const DISPLAY_MODE = process.env.DISPLAY_MODE || 'image';
 const LIVE_MAX_AGE_MS = (Number(process.env.LIVE_MAX_AGE_MIN) || 10) * 60 * 1000;
 const LIVE_TIMEOUT_MS = (Number(process.env.LIVE_TIMEOUT_SEC) || 20) * 1000;
 const MAP_WAIT_MS = (Number(process.env.MAP_WAIT_SEC) || 60) * 1000;
 const MAP_POLL_MS = (Number(process.env.MAP_POLL_SEC) || 10) * 1000;
+const REQUEST_TIMEOUT_MS = 20000;
 const DEFAULT_SETTINGS = { difficulty: 1 };
 if (!WEBHOOK_URL || !MESSAGE_ID) {
   console.error('Missing DISCORD_WEBHOOK_URL or DISCORD_MESSAGE_ID (repo secrets).');
   process.exit(1);
 }
+function request(url, options = {}) {
+  return fetch(url, { ...options, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+}
 function stateKey(name, map) {
-  return createHash('sha1').update(`${name}|${map}`).digest('hex').slice(0, 8);
+  return createHash('sha1').update(`${name}|${cleanMap(map)}`).digest('hex').slice(0, 8);
 }
 function messageUrl(id) {
   return `${WEBHOOK_URL}/messages/${id}`;
 }
 async function fetchFirstMessage() {
-  const res = await fetch(messageUrl(MESSAGE_ID));
+  const res = await request(messageUrl(MESSAGE_ID));
   if (!res.ok) throw new Error(`Cannot read first status message: HTTP ${res.status}`);
   const data = await res.json();
   const filename = data.attachments?.[0]?.filename || '';
@@ -48,16 +51,23 @@ async function fetchFirstMessage() {
       state[key] = { since: sinceValue, started: started === undefined ? sinceValue : parseInt(started, 36) };
     }
   }
-  const extra = match[2] === undefined ? null : match[2].split('_').filter((v) => /^\d+$/.test(v));
+  const extra = match[2] === undefined ? null : match[2].split('_').filter((value) => /^\d+$/.test(value));
   return { state, extra };
 }
+function finalizeCards(cards) {
+  const byName = new Map();
+  for (const card of cards) {
+    const nameKey = card.name.trim().toLowerCase();
+    const existing = byName.get(nameKey);
+    if (!existing || card.players > existing.players) byName.set(nameKey, card);
+  }
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name)).slice(0, MAX_CARDS);
+}
 function buildCards(listed, previous, now) {
-  const cards = listed.map((server) => {
+  return finalizeCards(listed.map((server) => {
     const key = stateKey(server.name, server.map);
     return { ...server, key, since: previous[key]?.since ?? now, started: previous[key]?.started ?? 0 };
-  });
-  cards.sort((a, b) => a.name.localeCompare(b.name));
-  return cards.slice(0, MAX_CARDS);
+  }));
 }
 function parseLive(data) {
   const players = String(data.top || '')
@@ -86,16 +96,16 @@ function parseLive(data) {
 }
 function liveSources() {
   const sources = [];
-  for (const n of [1, 2]) {
-    const host = process.env[`LIVE_${n}_HOST`];
-    const path = process.env[`LIVE_${n}_PATH`];
+  for (const number of [1, 2]) {
+    const host = process.env[`LIVE_${number}_HOST`];
+    const path = process.env[`LIVE_${number}_PATH`];
     if (!host || !path) continue;
     sources.push({
-      n,
+      number,
       host,
-      port: Number(process.env[`LIVE_${n}_PORT`]) || 8822,
-      username: process.env[`LIVE_${n}_USER`],
-      password: process.env[`LIVE_${n}_PASS`],
+      port: Number(process.env[`LIVE_${number}_PORT`]) || 8822,
+      username: process.env[`LIVE_${number}_USER`],
+      password: process.env[`LIVE_${number}_PASS`],
       path,
     });
   }
@@ -111,27 +121,26 @@ function withTimeout(promise, ms, label) {
 async function downloadLive(sftp, source) {
   await sftp.connect({ host: source.host, port: source.port, username: source.username, password: source.password, readyTimeout: 10000 });
   const stat = await sftp.stat(source.path);
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; ; attempt++) {
     try {
       const buffer = await sftp.get(source.path);
       const parsed = JSON.parse(buffer.toString('utf8'));
       parsed.exportedAt = Math.floor(stat.modifyTime / 1000);
       return parsed;
     } catch (err) {
-      if (attempt === 1) throw err;
+      if (attempt >= 1) throw err;
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
   }
-  return null;
 }
 async function readLiveSource(source) {
   const sftp = new SftpClient();
   try {
-    const data = await withTimeout(downloadLive(sftp, source), LIVE_TIMEOUT_MS, `Live source ${source.n}`);
-    if (data) console.log(`Live source ${source.n}: read OK, server "${data.server}".`);
+    const data = await withTimeout(downloadLive(sftp, source), LIVE_TIMEOUT_MS, `Live source ${source.number}`);
+    console.log(`Live source ${source.number}: read OK, server "${data.server}".`);
     return data;
   } catch (err) {
-    console.error(`Live source ${source.n} skipped: ${err.message}`);
+    console.error(`Live source ${source.number} skipped: ${err.message}`);
     return null;
   } finally {
     sftp.end().catch(() => {});
@@ -166,8 +175,7 @@ function buildLiveCards(live, previous, now) {
     const key = stateKey(data.name, map);
     cards.push({ name: data.name, module: '', gameType: '', map, region: '', players: data.count, maxPlayers: data.max, key, since: previous[key]?.since ?? now, started: previous[key]?.started ?? 0 });
   }
-  cards.sort((a, b) => a.name.localeCompare(b.name));
-  return cards.slice(0, MAX_CARDS);
+  return finalizeCards(cards);
 }
 function pickLive(live, card) {
   return live[card.name.trim().toLowerCase()] || null;
@@ -208,49 +216,39 @@ async function waitForFreshLive(cards, live, now) {
   return { live: current, stale };
 }
 function buildForm(image, filename, now) {
-  const attachments = [{ id: 0, filename }];
-  const payload = DISPLAY_MODE === 'image'
-    ? {
-        content: `-# Last update <t:${now}:t>`,
-        embeds: [],
-        attachments,
-        allowed_mentions: { parse: [] },
-      }
-    : {
-        content: '',
-        embeds: [
-          {
-            color: 0xd4af37,
-            image: { url: `attachment://${filename}` },
-            footer: { text: 'Last update' },
-            timestamp: new Date(now * 1000).toISOString(),
-          },
-        ],
-        attachments,
-      };
+  const payload = {
+    content: `-# Last update <t:${now}:t>`,
+    embeds: [],
+    attachments: [{ id: 0, filename }],
+    allowed_mentions: { parse: [] },
+  };
   const form = new FormData();
   form.append('payload_json', JSON.stringify(payload));
   form.append('files[0]', new Blob([image], { type: 'image/png' }), filename);
   return form;
 }
 async function writeMessage(id, image, filename, now) {
-  const res = await fetch(messageUrl(id), { method: 'PATCH', body: buildForm(image, filename, now) });
+  const res = await request(messageUrl(id), { method: 'PATCH', body: buildForm(image, filename, now) });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`Discord API error ${res.status}: ${await res.text()}`);
   console.log(`Status message ${id} updated.`);
   return id;
 }
 async function createMessage(image, filename, now) {
-  const res = await fetch(`${WEBHOOK_URL}?wait=true`, { method: 'POST', body: buildForm(image, filename, now) });
+  const res = await request(`${WEBHOOK_URL}?wait=true`, { method: 'POST', body: buildForm(image, filename, now) });
   if (!res.ok) throw new Error(`Discord API error ${res.status}: ${await res.text()}`);
   const id = (await res.json()).id;
   console.log(`Status message ${id} created.`);
   return id;
 }
 async function deleteMessage(id) {
-  const res = await fetch(messageUrl(id), { method: 'DELETE' });
-  if (!res.ok && res.status !== 404) console.error(`Failed to delete message ${id}: HTTP ${res.status}`);
-  else console.log(`Status message ${id} deleted.`);
+  try {
+    const res = await request(messageUrl(id), { method: 'DELETE' });
+    if (!res.ok && res.status !== 404) console.error(`Failed to delete message ${id}: HTTP ${res.status}`);
+    else console.log(`Status message ${id} deleted.`);
+  } catch (err) {
+    console.error(`Failed to delete message ${id}: ${err.message}`);
+  }
 }
 async function updateChannel(total) {
   if (!BOT_TOKEN || !CHANNEL_ID) {
@@ -258,7 +256,7 @@ async function updateChannel(total) {
     return;
   }
   const headers = { Authorization: `Bot ${BOT_TOKEN}` };
-  const res = await fetch(`${API}/channels/${CHANNEL_ID}`, { headers });
+  const res = await request(`${API}/channels/${CHANNEL_ID}`, { headers });
   if (!res.ok) throw new Error(`Failed to read channel: HTTP ${res.status}`);
   const current = (await res.json()).name;
   if (current.startsWith(CHANNEL_PREFIX) && current.replace(/\D/g, '') === String(total)) {
@@ -266,7 +264,7 @@ async function updateChannel(total) {
     return;
   }
   const desired = `${CHANNEL_PREFIX}${CHANNEL_SEPARATOR}${total}${CHANNEL_SEPARATOR}`;
-  const patch = await fetch(`${API}/channels/${CHANNEL_ID}`, {
+  const patch = await request(`${API}/channels/${CHANNEL_ID}`, {
     method: 'PATCH',
     headers: { ...headers, 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: desired }),
@@ -276,25 +274,35 @@ async function updateChannel(total) {
     console.log(`Rate limited, retry after ${body.retry_after}s -- will try again on the next run.`);
     return;
   }
-  if (!patch.ok) {
-    throw new Error(`Failed to rename channel: HTTP ${patch.status} ${await patch.text()}`);
-  }
+  if (!patch.ok) throw new Error(`Failed to rename channel: HTTP ${patch.status} ${await patch.text()}`);
   console.log(`Channel renamed: "${current}" -> "${desired}"`);
+}
+async function renderSlots(slots, now) {
+  const images = [];
+  for (const slot of slots) {
+    try {
+      images.push(await renderMonitor({ cards: slot, now, mapsDir: MAPS_DIR, keyword: NAME_KEYWORD }));
+    } catch (err) {
+      console.error(`Card render failed: ${err.message}`);
+      images.push(null);
+    }
+  }
+  return images;
 }
 async function main() {
   const all = await loadServerList();
-  const channelTotal = all === null ? null : all
-    .filter((s) => s.module.toLowerCase().includes(CHANNEL_MODULE_KEYWORD.toLowerCase()))
-    .reduce((sum, s) => sum + s.players, 0);
-  const listed = all === null ? [] : all.filter(
-    (s) => s.module.toLowerCase().includes(CARD_MODULE_KEYWORD.toLowerCase()) && s.name.toLowerCase().includes(NAME_KEYWORD.toLowerCase())
+  const listUnavailable = all === null;
+  const channelTotal = listUnavailable ? null : all
+    .filter((server) => server.module.toLowerCase().includes(CHANNEL_MODULE_KEYWORD.toLowerCase()))
+    .reduce((sum, server) => sum + server.players, 0);
+  const listed = listUnavailable ? [] : all.filter(
+    (server) => server.module.toLowerCase().includes(CARD_MODULE_KEYWORD.toLowerCase()) && server.name.toLowerCase().includes(NAME_KEYWORD.toLowerCase())
   );
   const first = await fetchFirstMessage();
-  const previous = first.state;
   const now = Math.floor(Date.now() / 1000);
   const fetchedLive = await fetchLive();
   console.log(`Live data available for: ${Object.keys(fetchedLive).join(', ') || 'none'}`);
-  const cards = all === null ? buildLiveCards(fetchedLive, previous, now) : buildCards(listed, previous, now);
+  const cards = listUnavailable ? buildLiveCards(fetchedLive, first.state, now) : buildCards(listed, first.state, now);
   const { live, stale } = await waitForFreshLive(cards, fetchedLive, now);
   const staleKeys = new Set(stale.map((card) => card.key));
   for (const card of cards) {
@@ -307,33 +315,48 @@ async function main() {
       if (card.live.wave < 2) card.started = 0;
       else if (card.players > 0 && card.started === 0) card.started = now;
     }
-  }
-  for (const card of cards) {
     const file = resolveMapImage(MAPS_DIR, card.map);
     console.log(`${card.name}: ${card.maxPlayers ? `${card.players}/${card.maxPlayers}` : card.players} map "${card.map}" -> ${file ? `maps/${basename(file)}` : 'no image'}`);
   }
-  const existingExtra = first.extra ?? SEED_EXTRA_IDS;
   const slots = cards.length === 0 ? [[]] : cards.map((card) => [card]);
+  const images = await renderSlots(slots, now);
+  if (!images[0]) throw new Error('First card could not be rendered -- nothing was changed on Discord.');
+  const existingExtra = first.extra ?? SEED_EXTRA_IDS;
+  const surplus = existingExtra.slice(slots.length - 1);
+  const createdIds = [];
   const extraIds = [];
-  for (let i = 1; i < slots.length; i++) {
-    const old = existingExtra[i - 1];
-    try {
-      const image = await renderMonitor({ cards: slots[i], now, mapsDir: MAPS_DIR, keyword: NAME_KEYWORD });
-      const filename = `mm-${now.toString(36)}-${slots[i][0].key}.${slots[i][0].since.toString(36)}.${slots[i][0].started.toString(36)}.png`;
-      let id = old ? await writeMessage(old, image, filename, now) : null;
-      if (!id) id = await createMessage(image, filename, now);
-      extraIds.push(id);
-    } catch (err) {
-      console.error(`Card ${i + 1} failed: ${err.message}`);
-      process.exitCode = 1;
-      if (old) extraIds.push(old);
+  try {
+    for (let index = 1; index < slots.length; index++) {
+      const previousId = existingExtra[index - 1];
+      if (!images[index]) {
+        process.exitCode = 1;
+        if (previousId) extraIds.push(previousId);
+        continue;
+      }
+      const card = slots[index][0];
+      const filename = `mm-${now.toString(36)}-${card.key}.${card.since.toString(36)}.${card.started.toString(36)}.png`;
+      try {
+        let id = previousId ? await writeMessage(previousId, images[index], filename, now) : null;
+        if (!id) {
+          id = await createMessage(images[index], filename, now);
+          createdIds.push(id);
+        }
+        extraIds.push(id);
+      } catch (err) {
+        console.error(`Card ${index + 1} failed: ${err.message}`);
+        process.exitCode = 1;
+        if (previousId) extraIds.push(previousId);
+      }
     }
+    if (listUnavailable) extraIds.push(...surplus);
+    const encoded = cards.map((card) => `${card.key}.${card.since.toString(36)}.${card.started.toString(36)}`).join('_') || 'none';
+    const filename = `mm-${now.toString(36)}-${encoded}-${extraIds.join('_') || 'none'}.png`;
+    if (!(await writeMessage(MESSAGE_ID, images[0], filename, now))) throw new Error('First status message was not found (HTTP 404) -- check DISCORD_MESSAGE_ID.');
+  } catch (err) {
+    for (const id of createdIds) await deleteMessage(id);
+    throw err;
   }
-  for (const id of existingExtra.slice(slots.length - 1)) await deleteMessage(id);
-  const image = await renderMonitor({ cards: slots[0], now, mapsDir: MAPS_DIR, keyword: NAME_KEYWORD });
-  const encoded = cards.map((c) => `${c.key}.${c.since.toString(36)}.${c.started.toString(36)}`).join('_') || 'none';
-  const filename = `mm-${now.toString(36)}-${encoded}-${extraIds.join('_') || 'none'}.png`;
-  if (!(await writeMessage(MESSAGE_ID, image, filename, now))) throw new Error('First status message was not found (HTTP 404) -- check DISCORD_MESSAGE_ID.');
+  if (!listUnavailable) for (const id of surplus) await deleteMessage(id);
   try {
     if (channelTotal === null) console.log('Server list unavailable -- channel name left unchanged.');
     else await updateChannel(channelTotal);

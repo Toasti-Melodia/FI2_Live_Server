@@ -532,7 +532,8 @@ async function drawCard(ctx, card, y, info) {
   drawLabel(ctx, 'MAP STARTED', x0, py + 160);
   ctx.textAlign = 'left';
   if (card.players > 0) {
-    const ago = card.started > 0 ? formatAgo(Math.max(0, info.now - card.started)) : '—';
+    const firstWave = card.live && card.live.wave === 1;
+    const ago = card.started > 0 ? formatAgo(Math.max(0, info.now - card.started)) : firstWave ? 'Just started' : '-';
     const wave = card.live && card.live.wave > 0 ? `[Wave: ${card.live.wave}]` : '';
     ctx.font = '21px MMBodyBold';
     const waveW = wave ? ctx.measureText(wave).width + 12 : 0;
@@ -548,7 +549,7 @@ async function drawCard(ctx, card, y, info) {
   } else {
     ctx.fillStyle = GREY;
     ctx.font = '24px MMBodyBold';
-    ctx.fillText('—', x0, py + 188);
+    ctx.fillText('-', x0, py + 188);
   }
   ctx.fillStyle = 'rgba(201,164,92,0.18)';
   ctx.fillRect(x0 + lw + 7.5, py + 92, 1, 142);

@@ -25,6 +25,8 @@ const INVASION_WORDS = {
   26: 'Greenskins',
   27: 'Sigmar',
   28: 'Dunland',
+  29: 'Umbar',
+  30: 'Persia',
 };
 const SCENARIO_DEFENDERS = { 2: 'The Gamblers', 10: 'The Jedi Council', 11: 'The Last Survivors' };
 const FULL_SETS = ['default', 'lotr', 'evil', 'humans', 'two towers', 'no chaos'];
